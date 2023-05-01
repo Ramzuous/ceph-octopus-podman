@@ -1,0 +1,6 @@
+---
+- name: Find {{ patterns }} in {{ paths }}
+  find:
+    paths: "{{ paths }}"
+    patterns: "{{ patterns }}"
+  register: result

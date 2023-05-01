@@ -1,0 +1,9 @@
+---
+- name: Copy {{ src }} to {{ dest }} owner {{ owner }} group {{ group }} mode {{ mode }} remote_src {{ remote_src }}
+  copy:
+    src: "{{ src }}"
+    dest: "{{ dest }}"
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    mode: '{{ mode }}'
+    remote_src: "{{ remote_src }}"

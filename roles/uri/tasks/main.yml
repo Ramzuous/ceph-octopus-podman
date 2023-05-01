@@ -1,0 +1,5 @@
+---
+- name: uri {{ url }} to {{ dest }}
+  uri:
+    url: "{{ url }}"
+    dest: "{{ dest }}"

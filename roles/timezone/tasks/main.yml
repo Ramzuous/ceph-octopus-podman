@@ -1,0 +1,4 @@
+---    
+- name: Set time-zone {{ name }}
+  timezone:
+    name: "{{ name }}"

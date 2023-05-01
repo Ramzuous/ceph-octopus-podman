@@ -1,0 +1,186 @@
+- hosts: localhost
+  vars:
+    osdPathToDelete: vars_files/osd-to-delete.yml
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/ceph-to-delete-hosts-vars.yml
+  tasks:
+    - include_role:
+        name: file
+      vars:
+        path: "{{ osdPathToDelete }}"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        state: "{{ item }}"
+        mode: '644'
+      with_items:
+        - absent
+        - touch
+    - include_role:
+        name: lineinfile
+      vars:
+        path: "{{ osdPathToDelete }}"
+        line: 'osd_to_delete:'
+        state: present
+    - include_role:
+        name: shell
+      vars:
+        command: echo " "$(grep {{ item }} vars_files/ceph-osd-vars.yml) >> "{{ osdPathToDelete }}"
+      with_items: "{{ ceph_components_to_delete }}"
+    - shell: grep 'vm_name:' {{ osdPathToDelete }}
+      ignore_errors: yes
+      register: check
+    - debug:
+        msg: "Playbook was stopped. No components to delete"
+      when: not check.msg==""
+    - meta: end_play
+      when: not check.msg==""
+
+- hosts: ceph-admin
+  gather_facts: false
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/osd-to-delete.yml
+  tasks:
+    - shell: ceph osd status {{ item.vm_name }} | grep {{ item.vm_name }} | awk -F '\\{{ item.vm_name }}' '{print $1"{{ item.vm_name }}"}' | sed 's/{{ item.vm_name }}//' | sed 's/ //g'
+      with_items: "{{ osd_to_delete }}"
+      register: osdId
+    - include_role:
+        name: shell
+      vars:
+        command: ceph orch daemon stop osd.{{ item.stdout }}
+      with_items: "{{ osdId.results }}"
+      when: not item.stdout=="Bucket'"
+    - name: Check if hosts exists
+      shell: |
+           ssh {{ item.vm_name }} podman ps | grep "\-crash" | sed 's/.* ceph-/ceph-/'
+           ssh {{ item.vm_name }} podman ps | grep "\-node-exporter" | sed 's/.* ceph-/ceph-/'
+      with_items: "{{ osd_to_delete }}"
+      register: res
+    - include_role:
+        name: shell
+      vars:
+        command: |
+                ceph orch daemon stop crash.{{ item.item.vm_name }}
+                ceph orch daemon stop node-exporter.{{ item.item.vm_name }}
+                ceph orch daemon rm crash.{{ item.item.vm_name }} --force
+                ceph orch daemon rm node-exporter.{{ item.item.vm_name }} --force
+      with_items: "{{ res.results }}"
+      when: item.stderr==""
+    - include_role:
+        name: shell
+      vars:
+        command: |
+                ceph orch daemon rm osd.{{ item.stdout }} --force
+                ceph osd purge osd.{{ item.stdout }} --yes-i-really-mean-it
+      with_items: "{{ osdId.results }}"
+      when: not item.stdout=="Bucket'"     
+    - include_role:
+        name: shell
+      vars:
+        command: ceph orch host rm {{ item.item.vm_name }}
+      with_items: "{{ res.results }}"
+      when: item.stderr==""
+      
+- hosts: cephcluster
+  gather_facts: false
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/osd-to-delete.yml
+  tasks:
+    - include_role:
+        name: lineinfile
+        tasks_from: lineinfile_regexp
+      vars: 
+        path: /etc/cloud/templates/hosts.redhat.tmpl 
+        regexp: "{{ item.vm_name }}"
+        state: absent
+      with_items: "{{ osd_to_delete }}"
+    - include_role:
+        name: knownHosts
+      vars:
+        name: "{{ item.ip_cloud }}"
+        path: /{{ ceph_user }}/.ssh/known_hosts 
+        state: absent
+      with_items: "{{ osd_to_delete }}"
+    - include_role:
+        name: blockinfile
+      vars:
+        path: /{{ ceph_user }}/.ssh/config
+        block: |
+               Host {{ item.vm_name }}
+                  Hostname {{ item.ip_cloud }}
+                  User {{ ceph_user }}
+        mark_name: "{{ item.vm_name }}"
+        state: absent
+      with_items: "{{ osd_to_delete }}"
+
+- hosts: operation_node_to_add
+  gather_facts: false
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/osd-to-delete.yml
+  tasks:    
+    - include_role:
+        name: proxmox_kvm
+        tasks_from: change_state_vms
+      vars:
+        node: "{{ item.target_node }}"
+        api_user: "{{ api_username }}"
+        api_password: "{{ api_pass }}"
+        api_host: "{{ operation_node_short }}"
+        name: "{{ item.vm_name }}"
+        force: yes
+        state: stopped
+        update: no
+        timeout: 120
+      with_items: "{{ osd_to_delete }}"
+    - include_role:
+        name: proxmox_kvm
+        tasks_from: change_state_vms
+      vars:
+        node: "{{ item.target_node }}"
+        api_user: "{{ api_username }}"
+        api_password: "{{ api_pass }}"
+        api_host: "{{ operation_node_short }}"
+        name: "{{ item.vm_name }}"
+        force: yes
+        state: absent
+        update: no
+        timeout: 600
+      with_items: "{{ osd_to_delete }}"
+        
+- hosts: localhost
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/osd-to-delete.yml
+  tasks:
+    - include_role:
+        name: file
+      vars:
+        path: "host_vars/{{ item.vm_name }}.yml"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        state: absent
+        mode: '644'
+      with_items: "{{ osd_to_delete }}"
+    - include_role:
+        name: lineinfile
+        tasks_from: lineinfile_regexp
+      vars: 
+        path: inventory/ceph-cluster-inventory.yml
+        regexp: "{{ item.vm_name }}"
+        state: absent
+      with_items: "{{ osd_to_delete }}"
+    - include_role:
+        name: lineinfile
+        tasks_from: lineinfile_regexp
+      vars: 
+        path: vars_files/ceph-osd-vars.yml
+        regexp: "{{ item.vm_name }}"
+        state: absent
+      with_items: "{{ osd_to_delete }}"
+    - shell: echo "Osds from vars_files/osd-to-delete.yml were deleted"
+      register: info
+    - debug:
+        var: info.stdout   

@@ -1,0 +1,42 @@
+- hosts: operation_node_to_add
+  gather_facts: false
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/ceph-mon-vars.yml
+    - vars_files/ceph-osd-vars.yml
+    - vars_files/ceph-admin-vars.yml
+  tasks:
+    - include_role:
+        name: proxmox_kvm
+        tasks_from: change_state_vms
+      vars:
+        node: "{{ item.target_node }}"
+        api_user: "{{ api_username }}"
+        api_password: "{{ api_pass }}"
+        api_host: "{{ operation_node_short }}"
+        name: "{{ item.vm_name }}"
+        force: yes
+        state: stopped
+        update: no
+        timeout: 120
+      with_items:
+        - "{{ ceph_admin_vars }}"
+        - "{{ ceph_mon_vars }}"
+        - "{{ ceph_osd_vars }}"
+    - include_role:
+        name: proxmox_kvm
+        tasks_from: change_state_vms
+      vars:
+        node: "{{ item.target_node }}"
+        api_user: "{{ api_username }}"
+        api_password: "{{ api_pass }}"
+        api_host: "{{ operation_node_short }}"
+        name: "{{ item.vm_name }}"
+        force: yes
+        state: absent
+        update: no
+        timeout: 600
+      with_items:
+        - "{{ ceph_admin_vars }}"
+        - "{{ ceph_mon_vars }}"
+        - "{{ ceph_osd_vars }}"

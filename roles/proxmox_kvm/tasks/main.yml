@@ -1,0 +1,12 @@
+---    
+- name: Create VM
+  proxmox_kvm:
+    node: "{{ node }}"
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    clone: "{{ clone }}"
+    target: "{{ target }}"
+    vmid: "{{ vmid }}"
+    name: "{{ name }}"
+    timeout: "{{ timeout }}"

@@ -1,0 +1,6 @@
+---
+- name: known_hosts {{ name }} path {{ path }} state {{ state }}
+  known_hosts:
+    name: "{{ name }}"
+    path: "{{ path }}"
+    state: "{{ state }}"

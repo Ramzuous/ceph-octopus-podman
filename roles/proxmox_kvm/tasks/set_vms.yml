@@ -1,0 +1,24 @@
+---
+- name: Set VM
+  proxmox_kvm:
+    node: "{{ node }}"
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    name: "{{ name }}"
+    boot: '{{ boot }}'
+    scsihw: "{{ scsihw }}"
+    net:
+      net0: "{{ net0 }}"
+    cores: "{{ cores }}"
+    vcpus: "{{ vcpus }}"
+    memory: "{{ memory }}"
+    searchdomains: "{{ searchdomains }}"
+    nameservers: "{{ nameservers }}"
+    ciuser: "{{ ciuser }}"
+    cipassword: "{{ cipassword }}"
+    sshkeys: "{{ sshkeys }}"
+    ipconfig:
+      ipconfig0: "{{ ipconfig0 }}"
+    update: "{{ update }}"
+    timeout: "{{ timeout }}"

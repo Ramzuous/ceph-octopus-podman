@@ -1,0 +1,8 @@
+---
+- name: file {{ path }} state {{ state }} with mode {{ mode }}
+  file:
+    path: "{{ path }}"
+    owner: "{{ owner }}"
+    group: "{{ group }}"
+    state: "{{ state }}"
+    mode: "{{ mode }}"

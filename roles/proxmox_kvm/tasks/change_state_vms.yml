@@ -1,0 +1,12 @@
+---
+- name: Change VM state to {{ state }}
+  proxmox_kvm:
+    node: "{{ node }}"
+    api_user: "{{ api_user }}"
+    api_password: "{{ api_password }}"
+    api_host: "{{ api_host }}"
+    name: "{{ name }}"
+    force: "{{ force }}"
+    state: "{{ state }}"
+    update: "{{ update }}"
+    timeout: "{{ timeout }}"

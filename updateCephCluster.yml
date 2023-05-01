@@ -1,0 +1,322 @@
+- hosts: operation_node_to_add
+  gather_facts: false
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/ceph-new-hosts-vars.yml
+  tasks:
+    - include_role:
+        name: proxmox_kvm
+      vars:
+        node: "{{ operation_node_short }}"
+        api_user: "{{ api_username }}"
+        api_password: "{{ api_pass }}"
+        api_host: "{{ operation_node_short }}"
+        clone: "{{ item.template_name }}"
+        target: "{{ item.target_node }}"
+        vmid: "{{ item.template_id }}"
+        name: "{{ item.vm_name }}"
+        timeout: 1200
+      with_items:
+        #- "{{ ceph_new_mon_vars }}"
+        - "{{ ceph_new_osd_vars }}"
+    - include_role:
+        name: proxmox_kvm
+        tasks_from: set_vms
+      vars:
+        node: "{{ item.target_node }}"
+        api_user: "{{ api_username }}"
+        api_password: "{{ api_pass }}"
+        api_host: "{{ operation_node_short }}"
+        name: "{{ item.vm_name }}"
+        boot: '{{ boot_order }}'
+        scsihw: "{{ scsi_hw }}"
+        net0: "{{ item.net0_hw }}"
+        cores: "{{ item.cores_num }}"
+        vcpus: "{{ item.vcpus_num }}"
+        memory: "{{ item.memory_size }}"
+        searchdomains: "{{ searchdomain_cloud }}"
+        nameservers: "{{ nameserver_cloud }}"
+        ciuser: "{{ ceph_user }}"
+        cipassword: "{{ ceph_pass }}"
+        sshkeys: "{{ idrsapub }}"
+        ipconfig0: "{{ item.network_cloud }}"
+        update: yes
+        timeout: 300
+      with_items:
+        #- "{{ ceph_new_mon_vars }}"
+        - "{{ ceph_new_osd_vars }}"
+    - include_role:
+        name: proxmox_kvm
+        tasks_from: change_state_vms
+      vars:
+        node: "{{ item.target_node }}"
+        api_user: "{{ api_username }}"
+        api_password: "{{ api_pass }}"
+        api_host: "{{ operation_node_short }}"
+        name: "{{ item.vm_name }}"
+        force: no
+        state: started
+        update: yes
+        timeout: 120
+      with_items:
+        #- "{{ ceph_new_mon_vars }}"
+        - "{{ ceph_new_osd_vars }}"
+    - include_role:
+        name: wait_for
+      vars:
+        host: "{{ item.ip_cloud }}"
+        port: 22
+        delay: 120
+      with_items:
+        #- "{{ ceph_new_mon_vars }}"
+        - "{{ ceph_new_osd_vars }}"
+        
+- hosts: cephcluster
+  gather_facts: false
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/ceph-mon-vars.yml
+    - vars_files/ceph-osd-vars.yml
+    - vars_files/ceph-admin-vars.yml
+  tasks:
+    - include_role:
+        name: replace
+      vars:
+        path: "{{ item.path }}"
+        regexp: "{{ item.regexp }}"
+        replace: "{{ item.replace }}"
+      with_items:
+        - { path: /etc/hostname, regexp: '.{{ searchdomain_cloud }}', replace: '' }
+        - { path: /etc/ssh/sshd_config, regexp: 'PasswordAuthentication no', replace: 'PasswordAuthentication yes' }
+    - include_role:
+        name: lineinfile
+      vars:
+        path: /etc/cloud/templates/hosts.redhat.tmpl 
+        line: 127.0.0.1 localhost
+        state: present
+    - include_role:
+        name: lineinfile          
+      vars:
+        path: /etc/cloud/templates/hosts.redhat.tmpl 
+        line: '{{ item.ip_cloud }} {{ item.vm_name }}.{{ ceph_domain }} {{ item.vm_name }}'
+        state: present
+      with_items: 
+        - "{{ ceph_admin_vars }}"
+        - "{{ ceph_mon_vars }}"
+        - "{{ ceph_osd_vars }}" 
+    - include_role:
+        name: reboot
+    - include_role:
+        name: shell
+      vars:
+        command: ssh-keyscan 127.0.0.1 >> /{{ ceph_user }}/.ssh/known_hosts
+    - include_role:
+        name: shell
+      vars:
+        command: ssh-keyscan localhost >> /{{ ceph_user }}/.ssh/known_hosts            
+    - include_role:
+        name: shell
+      vars:
+        command: ssh-keyscan "{{ item.ip_cloud }}" >> /{{ ceph_user }}/.ssh/known_hosts
+      with_items: 
+        - "{{ ceph_admin_vars }}"
+        - "{{ ceph_mon_vars }}"
+        - "{{ ceph_osd_vars }}"
+    - include_role:
+        name: blockinfile
+      vars:
+        path: /{{ ceph_user }}/.ssh/config
+        block: |
+               Host {{ item.vm_name }}
+                  Hostname {{ item.ip_cloud }}
+                  User {{ ceph_user }}
+        mark_name: "{{ item.vm_name }}"
+        state: present
+      with_items:
+        - "{{ ceph_admin_vars }}"
+        - "{{ ceph_mon_vars }}"
+        - "{{ ceph_osd_vars }}" 
+    - include_role:
+        name: copy
+      vars:
+        src: id_rsa
+        dest: /{{ ceph_user }}/.ssh/id_rsa
+        owner: "{{ ceph_user }}"
+        group: "{{ ceph_user }}"
+        mode: '400'
+        remote_src: no
+    - include_role:
+        name: shell
+      vars:
+        command: localectl set-keymap "{{ keyboard_layout }}"
+    - include_role:
+        name: find
+      vars:
+        paths: "/etc/yum.repos.d/"
+        patterns: "*.repo"
+    - include_role:
+        name: replace
+      vars:
+        path: "{{ item.path }}"
+        regexp: 'mirrorlist'
+        replace: '#mirrorlist'
+      with_items:
+        - "{{ result.files }}"
+    - include_role:
+        name: replace
+      vars:
+        path: "{{ item.path }}"
+        regexp: '#baseurl=http://mirror.centos.org'
+        replace: 'baseurl=http://vault.centos.org'
+      with_items:
+        - "{{ result.files }}"
+    - include_role:
+        name: dnf
+      vars:
+        name: "{{ item.name }}"
+        state: "{{ item.state }}"
+      with_items:
+        - name: "*"
+          state: latest 
+        - name: qemu-guest-agent
+          state: latest
+        - name: python3
+          state: latest
+        - name: python3-pip
+          state: latest
+        - name: chrony
+          state: latest
+        - name: lvm2
+          state: latest
+        - name: crun
+          state: latest
+        - name: runc
+          state: latest
+        - name: podman
+          state: present
+    - include_role:
+        name: timezone
+      vars:
+        name: "{{ time_zone }}"
+    - include_role:
+        name: uri
+      vars:
+        url: "{{ ceph_url }}"
+        dest: /{{ ceph_user }}
+    - include_role:
+        name: file
+      vars:
+        path: "{{ item.path }}"
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        state: "{{ item.state }}"
+        mode: "{{ item.mode }}"
+      with_items:
+        - { path: /etc/chrony.conf, owner: "{{ ceph_user }}", group: "{{ ceph_user }}", state: absent, mode: '0755' }
+        - { path: /etc/chrony.conf, owner: "{{ ceph_user }}", group: "{{ ceph_user }}", state: touch, mode: '0755' }
+        - { path: "/{{ ceph_user }}/cephadm", owner: "{{ ceph_user }}", group: "{{ ceph_user }}", state: touch, mode: '0755' }
+        - { path: /etc/ceph, owner: "{{ ceph_user }}", group: "{{ ceph_user }}", state: directory, mode: '0755' }
+    - include_role:
+        name: shell
+      vars:
+        command: "{{ item }}"
+      with_items:
+        - ./cephadm add-repo --release octopus
+        - ./cephadm install
+        - cephadm install ceph-common ceph-osd
+    - include_role:
+        name: systemd
+      vars:
+        name: "{{ item }}"
+        state: restarted
+        enabled: yes       
+      with_items:
+        - chronyd
+        - qemu-guest-agent
+        - sshd
+    - include_role:
+        name: dnf
+      vars:
+        name: "*"
+        state: latest 
+
+- hosts: cephadmin, cephmons
+  gather_facts: false
+  vars_files:
+    vars_files/ceph-vars.yml
+  tasks:
+    - include_role:
+        name: shell
+      vars: 
+        command: echo -e "{{ chrony_server_set }}" >> /etc/chrony.conf
+
+- hosts: cephosds
+  gather_facts: false
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/ceph-mon-vars.yml
+    - vars_files/ceph-admin-vars.yml
+  tasks:
+    - include_role:
+        name: lineinfile
+      vars:
+        path: /etc/chrony.conf
+        line: 'server {{ item.ip_cloud }}'
+        state: present
+      with_items: 
+        - "{{ ceph_admin_vars }}"
+        - "{{ ceph_mon_vars }}"
+
+- hosts: cephcluster
+  gather_facts: false
+  vars_files:
+    - vars_files/ceph-vars.yml
+  tasks:
+    - include_role:
+        name: shell
+      vars:
+        command: timedatectl set-ntp true
+    - include_role:
+        name: systemd
+      vars:
+        name: chronyd
+        state: restarted
+        enabled: yes
+          
+- hosts: cephadmin
+  gather_facts: false
+  vars_files:
+    - vars_files/ceph-vars.yml
+    - vars_files/ceph-new-hosts-vars.yml
+  tasks:
+    - include_role:
+        name: shell
+      vars:
+        command: ssh-copy-id -f -i /etc/ceph/ceph.pub "{{ ceph_user }}"@"{{ item.vm_name }}"
+      with_items:
+        #- "{{ ceph_new_mon_vars }}"
+        - "{{ ceph_new_osd_vars }}"
+    - include_role:
+        name: shell
+      vars:
+        command: ceph orch host add "{{ item.vm_name }}" "{{ item.ip_cloud }}" --labels _admin
+      with_items:
+        #- "{{ ceph_new_mon_vars }}"
+        - "{{ ceph_new_osd_vars }}"
+    #- name: Add mons
+      #shell: ceph orch daemon add mon "{{ item.vm_name }}":"{{ item.ip_cloud }}"
+      #with_items:
+        #- "{{ ceph_new_mon_vars }}"
+    - name: Add osds
+      shell: ceph orch daemon add osd "{{ item.vm_name }}":/dev/sdb
+      with_items:
+        - "{{ ceph_new_osd_vars }}"
+
+
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - shell: echo "Ceph Cluster was successfully updated"
+      register: result
+    - debug:
+        var: result.stdout_lines

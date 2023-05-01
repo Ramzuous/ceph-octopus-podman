@@ -1,0 +1,5 @@
+---
+- name: dnf {{ name }} state {{ state }}
+  dnf:
+    name: "{{ name }}"
+    state: "{{ state }}"
